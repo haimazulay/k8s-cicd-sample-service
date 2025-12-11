@@ -1,7 +1,15 @@
-# test L1 workflow trigger
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY . /app
 
-CMD ["python", "-c", "print('Hello from sample-service')"]
+# Install dependencies
+RUN pip install --no-cache-dir flask
+
+# Copy application code
+COPY app.py .
+
+# Expose the application port (for documentation only)
+EXPOSE 8080
+
+# Run the Flask app
+CMD ["python", "app.py"]
