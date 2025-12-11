@@ -1,0 +1,106 @@
+name: "L3 - Deploy on Merge to Main"
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "README.md"
+      - ".github/**"
+
+env:
+  # Helm chart location inside the repository
+  HELM_CHART_DIR: ./helm/app-chart
+
+  # Kubernetes namespace to deploy to
+  K8S_NAMESPACE: k8s-cicd-sample
+
+  # Helm release name (can be overridden per repo)
+  HELM_RELEASE_NAME: sample-service
+
+  # Docker registry and image details
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  deploy:
+    name: "Deploy Helm release to Kubernetes"
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: "Checkout source code"
+        uses: actions/checkout@v4
+        # This ensures that the Helm chart and deployment manifests are available.
+
+      - name: "Install kubectl"
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.30.0"
+        # kubectl is optional for Helm, but useful for post-deploy checks.
+
+      - name: "Install Helm CLI"
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+        # Same Helm version as in L1 to keep behavior consistent.
+
+      - name: "Configure kubeconfig from secret"
+        run: |
+          if [ -z "${KUBE_CONFIG}" ]; then
+            echo "KUBE_CONFIG secret is not set. Failing deployment."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.kube"
+          echo "${KUBE_CONFIG}" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+          echo "Kubeconfig written to \$HOME/.kube/config"
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        # The KUBE_CONFIG secret should contain a full kubeconfig file content.
+        # This step writes it to ~/.kube/config so kubectl and Helm can use it.
+
+      - name: "Create namespace if it does not exist"
+        run: |
+          kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1 || \
+          kubectl create namespace "${K8S_NAMESPACE}"
+        # Ensures the target namespace exists before we deploy.
+
+      - name: "Helm upgrade --install"
+        run: |
+          echo "Deploying release '${HELM_RELEASE_NAME}' to namespace '${K8S_NAMESPACE}'"
+          echo "Using image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          
+          helm upgrade --install "${HELM_RELEASE_NAME}" "${HELM_CHART_DIR}" \
+            --namespace "${K8S_NAMESPACE}" \
+            --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
+            --set image.tag="${IMAGE_TAG}"
+
+        env:
+          HELM_CHART_DIR: ${{ env.HELM_CHART_DIR }}
+          K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
+          HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        # 'helm upgrade --install' will create or update the release in the
+        # target namespace. We override the image repository and tag so that
+        # each deployment uses the image built for the current commit.
+
+      - name: "Check deployment rollout status"
+        run: |
+          kubectl rollout status deployment/"${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" --timeout=120s || {
+            echo "Deployment did not become ready in time."
+            kubectl get pods -n "${K8S_NAMESPACE}"
+            exit 1
+          }
+        env:
+          HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
+          K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
+        # This step waits for the deployment to become ready. If it fails,
+        # we print the pods status to help with troubleshooting.
