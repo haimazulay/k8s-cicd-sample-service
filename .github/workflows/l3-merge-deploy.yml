@@ -89,11 +89,26 @@ jobs:
 
       - name: "Check deployment rollout status"
         run: |
-          kubectl rollout status deployment/"${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" --timeout=120s || {
-            echo "Deployment did not become ready in time."
-            kubectl get all -n "${K8S_NAMESPACE}"
+          echo "Checking rollout status for ${HELM_RELEASE_NAME}..."
+          if ! kubectl rollout status deployment/"${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" --timeout=120s; then
+            echo "Deployment did not become ready in time. Debug info:"
+            echo "=== Pods in namespace ${K8S_NAMESPACE} ==="
+            kubectl get pods -n "${K8S_NAMESPACE}" -o wide || true
+
+            echo "=== Describe deployment ${HELM_RELEASE_NAME} ==="
+            kubectl describe deployment "${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" || true
+
+            echo "=== Describe pods ==="
+            kubectl describe pods -n "${K8S_NAMESPACE}" || true
+
+            FIRST_POD=$(kubectl get pods -n "${K8S_NAMESPACE}" -l app.kubernetes.io/name="${HELM_RELEASE_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$FIRST_POD" ]; then
+              echo "=== Logs from pod ${FIRST_POD} ==="
+              kubectl logs "${FIRST_POD}" -n "${K8S_NAMESPACE}" || true
+            fi
+
             exit 1
-          }
+          fi
         env:
           HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
