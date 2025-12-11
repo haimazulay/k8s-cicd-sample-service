@@ -25,7 +25,7 @@ env:
 
 jobs:
   deploy:
-    name: "Deploy Helm release to Kubernetes"
+    name: "Deploy to ephemeral kind cluster"
     runs-on: ubuntu-latest
 
     permissions:
@@ -36,51 +36,46 @@ jobs:
         uses: actions/checkout@v4
         # This ensures that the Helm chart and deployment manifests are available.
 
-      - name: "Install kubectl"
-        uses: azure/setup-kubectl@v4
+      - name: "Create kind cluster for CI"
+        uses: helm/kind-action@v1
         with:
-          version: "v1.30.0"
-        # kubectl is optional for Helm, but useful for post-deploy checks.
+          cluster_name: ci-cd-demo
+          wait: 60s
+        # This action:
+        #  - installs kind
+        #  - creates a Kubernetes cluster inside Docker
+        #  - configures kubeconfig for kubectl and Helm.
 
       - name: "Install Helm CLI"
         uses: azure/setup-helm@v4
         with:
           version: v3.16.2
-        # Same Helm version as in L1 to keep behavior consistent.
+        # Same Helm version as in L1 for consistent behavior.
 
-      - name: "Configure kubeconfig from secret"
+      - name: "Verify cluster connectivity"
         run: |
-          if [ -z "${KUBE_CONFIG}" ]; then
-            echo "KUBE_CONFIG secret is not set. Failing deployment."
-            exit 1
-          fi
-
-          mkdir -p "$HOME/.kube"
-          echo "${KUBE_CONFIG}" > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-
-          echo "Kubeconfig written to \$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-        # The KUBE_CONFIG secret should contain a full kubeconfig file content.
-        # This step writes it to ~/.kube/config so kubectl and Helm can use it.
+          echo "Current Kubernetes context:"
+          kubectl config current-context
+          echo "Listing nodes:"
+          kubectl get nodes
 
       - name: "Create namespace if it does not exist"
         run: |
           kubectl get namespace "${K8S_NAMESPACE}" >/dev/null 2>&1 || \
           kubectl create namespace "${K8S_NAMESPACE}"
+        env:
+          K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
         # Ensures the target namespace exists before we deploy.
 
       - name: "Helm upgrade --install"
         run: |
           echo "Deploying release '${HELM_RELEASE_NAME}' to namespace '${K8S_NAMESPACE}'"
           echo "Using image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-          
+
           helm upgrade --install "${HELM_RELEASE_NAME}" "${HELM_CHART_DIR}" \
             --namespace "${K8S_NAMESPACE}" \
             --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
             --set image.tag="${IMAGE_TAG}"
-
         env:
           HELM_CHART_DIR: ${{ env.HELM_CHART_DIR }}
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
@@ -88,19 +83,18 @@ jobs:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
-        # 'helm upgrade --install' will create or update the release in the
-        # target namespace. We override the image repository and tag so that
-        # each deployment uses the image built for the current commit.
+        # This command deploys the chart into the kind cluster using the image
+        # that was built and pushed by the L2 pipeline.
 
       - name: "Check deployment rollout status"
         run: |
           kubectl rollout status deployment/"${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" --timeout=120s || {
             echo "Deployment did not become ready in time."
-            kubectl get pods -n "${K8S_NAMESPACE}"
+            kubectl get all -n "${K8S_NAMESPACE}"
             exit 1
           }
         env:
           HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
-        # This step waits for the deployment to become ready. If it fails,
-        # we print the pods status to help with troubleshooting.
+        # This step waits until the deployment is ready and prints useful
+        # debugging information if something goes wrong.
