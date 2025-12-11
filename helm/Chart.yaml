@@ -1,0 +1,9 @@
+apiVersion: v2
+name: app-chart
+description: >
+  Generic Helm chart template for onboarding applications into a shared
+  Kubernetes CI/CD pipeline.
+
+type: application
+version: 0.1.0          # Chart version (bump this when chart structure changes)
+appVersion: "1.0.0"     # Application version (can be overridden per service)
