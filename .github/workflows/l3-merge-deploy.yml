@@ -18,14 +18,13 @@ env:
   # Helm release name (can be overridden per repo)
   HELM_RELEASE_NAME: sample-service
 
-  # Docker registry and image details
-  REGISTRY: docker.io
-  IMAGE_NAME: ${{ github.repository }}
-  IMAGE_TAG: sha-${{ github.sha }}
+  # Local image name that will be built and loaded into kind
+  LOCAL_IMAGE_NAME: sample-service
+  LOCAL_IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:
   deploy:
-    name: "Deploy to ephemeral kind cluster"
+    name: "Build image and deploy to ephemeral kind cluster"
     runs-on: ubuntu-latest
 
     permissions:
@@ -34,23 +33,45 @@ jobs:
     steps:
       - name: "Checkout source code"
         uses: actions/checkout@v4
-        # This ensures that the Helm chart and deployment manifests are available.
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+        # Buildx is recommended for modern Docker builds and caching.
+
+      - name: "Build application image (local only)"
+        run: |
+          IMAGE="${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}"
+          echo "Building local image: ${IMAGE}"
+          docker build -t "${IMAGE}" -f ./Dockerfile .
+          docker images "${IMAGE}"
+        env:
+          LOCAL_IMAGE_NAME: ${{ env.LOCAL_IMAGE_NAME }}
+          LOCAL_IMAGE_TAG: ${{ env.LOCAL_IMAGE_TAG }}
+        # This builds the application image locally on the GitHub runner.
+        # We do NOT push it to any remote registry in this job.
 
       - name: "Create kind cluster for CI"
         uses: helm/kind-action@v1
         with:
           cluster_name: ci-cd-demo
           wait: 60s
-        # This action:
-        #  - installs kind
-        #  - creates a Kubernetes cluster inside Docker
-        #  - configures kubeconfig for kubectl and Helm.
+        # This action installs kind, creates a cluster, and configures kubeconfig.
+
+      - name: "Load local image into kind cluster"
+        run: |
+          IMAGE="${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}"
+          echo "Loading image ${IMAGE} into kind cluster 'ci-cd-demo'"
+          kind load docker-image "${IMAGE}" --name ci-cd-demo
+        env:
+          LOCAL_IMAGE_NAME: ${{ env.LOCAL_IMAGE_NAME }}
+          LOCAL_IMAGE_TAG: ${{ env.LOCAL_IMAGE_TAG }}
+        # `kind load docker-image` makes the locally built image available
+        # to all nodes in the kind cluster without using an external registry.
 
       - name: "Install Helm CLI"
         uses: azure/setup-helm@v4
         with:
           version: v3.16.2
-        # Same Helm version as in L1 for consistent behavior.
 
       - name: "Verify cluster connectivity"
         run: |
@@ -65,29 +86,30 @@ jobs:
           kubectl create namespace "${K8S_NAMESPACE}"
         env:
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
-        # Ensures the target namespace exists before we deploy.
 
       - name: "Helm upgrade --install"
         run: |
+          IMAGE="${LOCAL_IMAGE_NAME}"
+          TAG="${LOCAL_IMAGE_TAG}"
+
           echo "Deploying release '${HELM_RELEASE_NAME}' to namespace '${K8S_NAMESPACE}'"
-          echo "Using image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Using image: ${IMAGE}:${TAG}"
 
           helm upgrade --install "${HELM_RELEASE_NAME}" "${HELM_CHART_DIR}" \
             --namespace "${K8S_NAMESPACE}" \
             --set fullnameOverride="${HELM_RELEASE_NAME}" \
-            --set image.repository="${REGISTRY}/${IMAGE_NAME}" \
-            --set image.tag="${IMAGE_TAG}"
+            --set image.repository="${IMAGE}" \
+            --set image.tag="${TAG}"
         env:
           HELM_CHART_DIR: ${{ env.HELM_CHART_DIR }}
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
           HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
-          REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
-        # This command deploys the chart into the kind cluster using the image
-        # that was built and pushed by the L2 pipeline.
+          LOCAL_IMAGE_NAME: ${{ env.LOCAL_IMAGE_NAME }}
+          LOCAL_IMAGE_TAG: ${{ env.LOCAL_IMAGE_TAG }}
+        # The Helm release is configured to use the locally built image,
+        # which was already loaded into the kind cluster.
 
-      - name: "Check deployment rollout status"
+      - name: "Check deployment rollout status (with debug)"
         run: |
           echo "Checking rollout status for ${HELM_RELEASE_NAME}..."
           if ! kubectl rollout status deployment/"${HELM_RELEASE_NAME}" -n "${K8S_NAMESPACE}" --timeout=120s; then
@@ -112,5 +134,3 @@ jobs:
         env:
           HELM_RELEASE_NAME: ${{ env.HELM_RELEASE_NAME }}
           K8S_NAMESPACE: ${{ env.K8S_NAMESPACE }}
-        # This step waits until the deployment is ready and prints useful
-        # debugging information if something goes wrong.
