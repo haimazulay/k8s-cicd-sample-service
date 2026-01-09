@@ -1,0 +1,10 @@
+name: "L3 - Deploy"
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  call-l3:
+    uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l3-merge-deploy.yml@main
+    secrets: inherit
