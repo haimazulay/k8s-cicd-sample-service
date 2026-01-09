@@ -1,0 +1,14 @@
+name: "L1 - PR"
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  call-l1:
+    uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l1-pr-build-and-package.yml@main
+    secrets: inherit
