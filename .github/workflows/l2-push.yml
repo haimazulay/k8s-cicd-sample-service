@@ -8,6 +8,11 @@ on:
       - "feature/**"
       - "hotfix/**"
 
+permissions:
+  contents: read
+  packages: write
+
+
 jobs:
   call-l2:
     uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l2-push-validate-and-build.yml@main
