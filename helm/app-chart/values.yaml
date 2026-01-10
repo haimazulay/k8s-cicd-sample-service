@@ -26,9 +26,9 @@ serviceAccount:
 podSecurityContext: {}
   # fsGroup: 2000
 
-securityContext: {}
-  # runAsUser: 1000
-  # runAsNonRoot: true
+securityContext:
+  runAsUser: 10001
+  runAsNonRoot: true
 
 service:
   type: ClusterIP
@@ -49,13 +49,13 @@ ingress:
   #    hosts:
   #      - example.local
 
-resources: {}
-  # limits:
-  #   cpu: 200m
-  #   memory: 256Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
 
 autoscaling:
   enabled: false
