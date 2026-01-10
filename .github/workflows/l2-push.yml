@@ -11,4 +11,8 @@ on:
 jobs:
   call-l2:
     uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l2-push-validate-and-build.yml@main
+    with:
+      registry: ghcr
+      image_name: "${SERVICE_NAME}"
+      dockerfile_path: "./Dockerfile"
     secrets: inherit
