@@ -9,7 +9,6 @@ jobs:
     uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l3-merge-deploy.yml@main
     with:
       helm_chart_dir: ./helm/app-chart
-      k8s_namespace: my-service
-      helm_release_name: my-service
-      image_name: my-service
+      k8s_namespace: k8s-cicd-sample-service
+      helm_release_name: k8s-cicd-sample-service
     secrets: inherit
