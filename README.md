@@ -1,74 +1,99 @@
 # k8s-cicd-sample-service
 
-A live example service demonstrating the usage of the [Kubernetes CI/CD Templates](https://github.com/haimazulay/github-k8s-cicd-templates).
+![CI/CD](https://github.com/haimazulay/k8s-cicd-sample-service/actions/workflows/l2-push.yml/badge.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Python](https://img.shields.io/badge/python-3.12-yellow)
+![Docker](https://img.shields.io/badge/docker-multi--stage-green)
 
-This repository serves as a reference implementation for onboarding applications to the centralized CI/CD pipeline.
+A reference implementation of a production-ready microservice onboarded to the [Common CI/CD Pipeline](https://github.com/haimazulay/github-k8s-cicd-templates).
 
-## Repository Contents
+## 🚀 Overview
 
-*   **Application**: A Python Flask service (`app.py`) exposing `/healthz` and `/ready` endpoints.
-*   **Dockerfile**: Configuration to build the application container.
-*   **Helm Chart**: Located in `helm/` for Kubernetes deployment.
-*   **CI/CD Workflows**: Minimal "caller" workflows in `.github/workflows/` that inherit logic from the templates repository.
+This repository demonstrates how to build, publish, and deploy a Python Flask application using a centralized GitHub Actions pipeline. It adheres to Kubernetes best practices, including:
 
-## End-to-End CI/CD Flow
+*   **Security**: Non-root container user (`appuser`, UID 10001).
+*   **Observability**: Structured JSON logging.
+*   **Reliability**: Liveness (`/healthz`) and Readiness (`/ready`) probes.
+*   **Efficiency**: Multi-stage Docker builds.
 
-The pipeline is divided into three levels, each triggered by specific Git events:
+## 🏗 Architecture
 
-### 1. Level 1: Pull Request (Validation)
-**File:** `.github/workflows/l1-pr.yml`
+The CI/CD pipeline consists of three reusable workflows triggered by standard Git events.
 
-*   **Trigger**: Open a Pull Request targeting `main`.
-*   **What it does**:
-    *   Checkouts code.
-    *   Builds the Docker image (test build, no push).
-    *   Lints the Helm chart (`helm lint`).
-    *   Packages the Helm chart.
-*   **Goal**: Ensure the code is buildable and the chart is valid before merging.
+```mermaid
+graph TD
+    User([Developer]) -->|Push Branch| A[GitHub Repository]
+    User -->|Open PR| A
+    
+    subgraph CI/CD Pipeline
+        direction TB
+        A -->|Pull Request| L1(L1: PR Validation)
+        L1 -->|Build & Lint| B{Status}
+        
+        A -->|Push Branch| L2(L2: Build & Push)
+        L2 -->|Unit Tests| C[Test Code]
+        C -->|Build Config| D[Build Image]
+        D -->|Publish| E[GHCR / DockerHub]
+        
+        A -->|Merge Main| L3(L3: Deploy)
+        L3 -->|Kind Cluster| F[Ephemeral Deploy]
+        F -->|Verify| G[Helm Test]
+    end
+```
 
-### 2. Level 2: Push (Build & Publish)
-**File:** `.github/workflows/l2-push.yml`
+## 🛠 Repository Structure
 
-*   **Trigger**: Push to branches (e.g., `feature/**`, `develop`, `main`).
-*   **What it does**:
-    *   Runs application validation (tests/lints).
-    *   Builds the Docker image.
-    *   Pushes the image to the container registry (e.g., GHCR or Docker Hub) if secrets are configured.
-*   **Goal**: Create and publish immutable artifacts for every commit.
+| File/Directory | Description |
+| t| t |
+| `app.py` | Production-ready Flask application with Gunicorn support. |
+| `Dockerfile` | Optimized multi-stage build definition. |
+| `helm/` | Helm chart with security context and resource policies. |
+| `.github/workflows/` | Callers for centralized reusable workflows. |
+| `requirements.txt` | Explicit Python dependencies. |
 
-### 3. Level 3: Merge (Deploy & Verify)
-**File:** `.github/workflows/l3-merge.yml`
+## 💻 Local Development
 
-*   **Trigger**: Merge (push) to `main`.
-*   **What it does**:
-    *   Creates an ephemeral Kubernetes cluster using `kind`.
-    *   Deploys the application using the local Helm chart and the built image.
-    *   Wait for the rollout to complete.
-    *   Verifies the application availability.
-*   **Goal**: Simulate a real deployment and verify the service runs correctly in a Kubernetes environment.
-
-## Application Endpoints
-
-The service listens on port **8080**.
-
-*   `GET /`: Returns a welcome message.
-*   `GET /healthz`: Liveness probe (Returns 200 OK).
-*   `GET /ready`: Readiness probe (Returns 200 OK).
-
-## How to Run Locally
+### 1. Run Logic Locally
 
 ```bash
 # Install dependencies
-pip install flask
+pip install -r requirements.txt
 
-# Run application
+# Run in development mode
 python app.py
 ```
 
-## How to Onboard Your Service
+### 2. Run Container Locally
 
-To use this CI/CD setup in your own repository:
-1. Copy the `.github/workflows/*.yml` files.
-2. Copy the `helm/` directory (or use your own chart).
-3. Ensure your `Dockerfile` exists.
-4. Update `inputs` in the workflow files (e.g., `image_name`, `chart_path`) if necessary.
+```bash
+# Build image
+docker build -t sample-service:local .
+
+# Run container (readonly root, port 8080)
+docker run --rm -p 8080:8080 --read-only --tmpfs /tmp sample-service:local
+```
+
+## ☸️ Kubernetes Configuration
+
+The Helm chart in `helm/app-chart` is pre-configured for security:
+
+*   **User**: `10001` (matches Dockerfile)
+*   **Resources**: Limits: 500m/512Mi, Requests: 100m/128Mi
+*   **Probes**: configured for low-latency startup.
+
+## 📋 API Endpoints
+
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Hello World message. |
+| `GET` | `/healthz` | Liveness probe (returns 200). |
+| `GET` | `/ready` | Readiness probe (returns 200). |
+
+## 🤝 Onboarding Guide
+
+To adopt this pattern:
+
+1.  Copy `.github/workflows/` to your repo.
+2.  Set `image_name` to `${{ github.repository }}` in `l2-push.yml`.
+3.  Ensure your `Dockerfile` supports non-root execution.
+4.  Copy `helm/` and update `values.yaml` for your app specifics.
