@@ -4,10 +4,6 @@ on:
   push:
     branches: [ main ]
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   call-l3:
     uses: haimazulay/github-k8s-cicd-templates/.github/workflows/l3-merge-deploy.yml@main
